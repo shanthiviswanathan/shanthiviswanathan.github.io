@@ -1,0 +1,99 @@
+---
+title: "Practical Machine Learning Project"
+author: "Shanthi Viswanathan"
+date: "September 8, 2014"
+output: html_document
+---
+### Synopsis
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: 
+
+ * exactly according to the specification (Class A), 
+ * throwing the elbows to the front (Class B), 
+ * lifting the dumbbell only halfway (Class C), 
+ * lowering the dumbbell only halfway (Class D) and 
+ * throwing the hips to the front (Class E).
+
+The goal of this project is to predict the manner in which the participants did the exercise. Machine Learning is the process of using algorithms to learn from data.
+
+Read more:http://groupware.les.inf.puc-rio.br/har#dataset
+
+### The Data
+In the study referenced above, the data was obtained by attaching sensors (inertial measurement units) to both study participants, and weights, to measure the motion as exercises were performed. 
+
+In the final data set, available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv), each record consists of measurements obtained per person/exercise form in short span of time (0.5 - 2.5 seconds).
+
+### Load needed libraries
+
+```{r LoadLibraries}
+library(caret);library(lattice);library(ggplot2)
+set.seed(34567)
+```
+
+### Data Processing
+First, we import the data and take an initial look at it:
+```{r ReadData}
+pml_training <- read.csv("pml-training.csv", na.strings=c("NA","","#DIV/0!"), strip.white=TRUE)
+dim(pml_training)
+```
+There are 19622 records with 160 variables. 
+
+```{r PlotData}
+barplot(table(pml_training$classe), main="Bar plot for Class Type",  names.arg=c("Class A", "Class B", "Class C", "Class D", "Class E"), col=c("darkblue","red","darkgreen","yellow","magenta"), ylab="Count")
+```
+The variable we will be predicting on is **classe**, and the data is split up between the five **classes** A, B, C, D and E. Let us inspect the data to see if we can identify columns that are not needed for our prediction model.
+```{r FindNAColumns}
+na_data = sapply(pml_training, function(x) {sum(is.na(x))})
+table(na_data)
+```
+There are only 60 columns with no null values and the remaining 100 columns have almost all missing values. We can remove these columns from our training data and take a look at the remaining columns.
+```{r DiscardNAColumns}
+bad_columns = names(na_data[na_data>19000])
+new_training = pml_training[, !names(pml_training) %in% bad_columns]
+```
+The first seven columns are not related to the movement data and hence can be removed. 
+```{r RemoveNonMovementColumns}
+new_training = new_training [,-c(1:7)]
+```
+Split the data into training and test.
+```{r PartitionData}
+set.seed(0)
+inTrain = createDataPartition(y=new_training$classe, p=0.7, list=FALSE)
+training = new_training [inTrain,]
+validate = new_training [-inTrain,]
+dim(training)
+```
+#### Fit Random forest classification model
+```{r RF, cache=TRUE}
+ctrl <- trainControl(allowParallel=TRUE, method="cv", number=4)
+modelRF <- train(classe ~ ., data=training, method="rf", trControl=ctrl)
+modelRF
+```
+The model's accuracy is 1 and hence the out-of-sample error should be very minimal. 
+
+#### Estimating out-of-sample error
+We use the above model and apply on the *validation* data set.
+```{r ValidateModel}
+predictorRF <- predict(modelRF, validate)
+cm <- confusionMatrix(predictorRF, validate$classe)
+cm
+```
+The accuracy on validation data set is `r cm$overall[1][[1]]` which is very good. We can be **95% confident that the out-of-sample error of our model is between `r (1 - cm$overall[3][[1]])*100`% and `r (1 - cm$overall[4][[1]])*100`%**.
+
+####Talk about Importance
+```{r ImportanceRF}
+plot(varImp (modelRF , scale = FALSE), top = 20)
+trellis.par.set(caretTheme())
+plot (modelRF , type = c("g", "o"))
+```
+
+### Predicting values for testing data set
+```{r TestRF}
+pml_test <- read.csv("pml-testing.csv", na.strings=c("NA","","#DIV/0!"),  strip.white=T)
+pml_test <- pml_test[, !names(pml_test) %in% bad_columns]
+pml_test <- pml_test [,-c(1:7)]
+predict(modelRF, newdata=pml_test)
+```
+
+### References
+1. Velloso, E., et al. Qualitative Activity Recognition of Weight Lifting Exercises. Available at http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201
+2. Dataset source: http://groupware.les.inf.puc-rio.br/har
